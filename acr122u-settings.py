@@ -2,9 +2,9 @@
 '''
 ACS ACR122U NFC Reader settings view/change tool
 '''
+import datetime, sys
 import re, argparse
 from smartcard.System import readers
-import datetime, sys
 import smartcard.Exceptions
 
 SETTINGS_CMD_GET = {
@@ -264,6 +264,38 @@ def decodeStatus(data):
             }.get(data[8 + i * 5], "Unknown")
             print (f"  Modulation type: {modtype}")
 
+"""
+VISA_AID = [0xA0, 0x00, 0x00, 0x00, 0x03, 0x10, 0x10]
+MASTERCARD_AID = [0xA0, 0x00, 0x00, 0x00, 0x04, 0x10, 0x10]
+AMEX_AID = [0xA0, 0x00, 0x00, 0x00, 0x02, 0x50, 0x10]
+"""
+def decode_AID(data):
+    # decode AID
+    if len(data) < 5:
+        print ("Error: Invalid AID response")
+        return
+    aid = data[0:5]
+    # decode AID
+    aid_str = ""
+    for i in range(len(aid)):
+        aid_str += format(aid[i], '#04x')[2:] + " "
+    print (f"AID: {aid_str}")
+    # decode AID type
+    aid_type = {
+        0x00: "Visa",
+        0x01: "Mastercard",
+        0x02: "American Express",
+        0x03: "Discover",
+        0x04: "JCB",
+        0x05: "Diners Club",
+        0x06: "UnionPay",
+        0x07: "RuPay",
+    }.get(aid[4], "Unknown")
+    print (f"AID type: {aid_type}")
+
+
+
+
 def testReader(id, atrlist):
     # get all the available readers
     r = readers()
@@ -388,7 +420,48 @@ def getFirmwareVersion(id):
         print ("Firmware version: ", ''.join(chr(i) for i in data))
         #disconnect
         connection.disconnect()
-    
+
+PSE_AID = [
+    0x31, 0x50, 0x41, 0x59, 0x2E, 0x53, 0x59, 0x53,
+    0x2E, 0x44, 0x44, 0x46, 0x30, 0x31
+]
+
+def getCreditCardInfo(id):
+    # get all the available readers
+    r = readers()
+    print ("Available readers:", r)
+
+    # select the first reader
+    reader = r[0]
+    print ("Using:", reader)
+
+    # create a connection to the reader
+    connection = reader.createConnection()
+    if (connection):
+        try:
+            connection.connect()
+        except smartcard.Exceptions.NoCardException:
+            print ("Error: No card found")
+            return None
+
+        # get the ATR of the card
+        atr = connection.getATR()
+        # if atr None, card not present
+        if atr is None:
+            print ("Error: No card found")
+            return None
+
+# Standard SELECT PSE APDU
+        CMD_SELECT_PSE = [0x00, 0xA4, 0x04, 0x00, len(PSE_AID)] + PSE_AID
+        print ("CMD: ", hex2str(CMD_SELECT_PSE))
+        data, sw1, sw2 = connection.transmit(CMD_SELECT_PSE)
+        if sw1 != 0x90:
+            print ("Error: Failed to get PSE AID")
+            return None
+        # print PSE AID in hex
+        print ("PSE AID: ", hex2str(data))
+
+
 def main():
     argp = argparse.ArgumentParser(description='ACS ACR122U NFC Reader settings view/change tool')
     # test reader
@@ -396,12 +469,18 @@ def main():
     argp.add_argument('--getfw', action='store_true', help='Get firmware version')
     argp.add_argument('--getpicc', action='store_true', help='Get PICC Operating Parameter')
     argp.add_argument('--setpicc', action='store_true', help='Set PICC Operating Parameter')
+    argp.add_argument('--getcc', action='store_true', help='Get Credit Card info')
     # list operating parameters
     argp.add_argument('-l', '--list', action='store_true', help='List operating parameters')
     args = argp.parse_args()
 
     atrlist = load_atrlist()
-    # test
+
+    if args.getcc:
+        print ("Get Credit Card info")
+        getCreditCardInfo(0)
+        return
+
     if args.status:
         testReader(0, atrlist)
         return
