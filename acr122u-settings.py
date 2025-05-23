@@ -12,32 +12,166 @@ SETTINGS_CMD_GET = {
     "Set PICC Operating Parameter": [0xFF, 0x00, 0x51, 0x00, 0x00],
 }
 
-def decodeATR(atr):
-    # atr in HEX
-    atr_printable = [0] * len(atr)
-    for i in range(len(atr)):
-        atr_printable[i] = format(atr[i], '#04x')[2:]
-    print (f"ATR(hex): {atr_printable} len {len(atr)}")
+TAG_TYPE_MAP = {
+    0x11: "MIFARE Classic 1K",
+    0x18: "MIFARE Classic 1K (variant)",
+    0x88: "MIFARE Classic 1K (variant)",
+    0x08: "MIFARE Classic 2K",
+    0x12: "MIFARE Classic 4K",
+    0x02: "MIFARE Mini",
+    0x09: "MIFARE Mini (variant)",
+    0x04: "MIFARE Ultralight",
+    0x03: "MIFARE Ultralight C",
+    0x44: "MIFARE Plus",
+    0x42: "MIFARE Plus 2K",
+    0x43: "MIFARE Plus 4K",
+    0x28: "MIFARE DESFire",
+    0x30: "MIFARE DESFire EV1",
+    0x31: "MIFARE DESFire EV2",
+    0x32: "MIFARE DESFire EV3",
+    0x20: "ISO 14443-4",
+    0x40: "ISO 14443 Type A",
+    0x41: "ISO 14443 Type B",
+    0x21: "ISO 15693",
+    0x01: "Topaz/Type 1",
+    0x10: "FeliCa (Type 3)",
+}
+
+
+# Fi (Clock Rate Conversion Factor) lookup table
+ta1_Fi_table = {
+    0x0: (372, "Internal clock"),
+    0x1: (372, "372"),
+    0x2: (558, "558"), 
+    0x3: (744, "744"),
+    0x4: (1116, "1116"),
+    0x5: (1488, "1488"),
+    0x6: (1860, "1860"),
+    0x7: (None, "RFU"),
+    0x8: (None, "RFU"),
+    0x9: (512, "512"),
+    0xA: (768, "768"),
+    0xB: (1024, "1024"),
+    0xC: (1536, "1536"),
+    0xD: (2048, "2048"),
+    0xE: (None, "RFU"),
+    0xF: (None, "RFU")
+}
+
+# Di (Baud Rate Adjustment Factor) lookup table
+ta1_Di_table = {
+    0x0: (None, "RFU"),
+    0x1: (1, "1"),
+    0x2: (2, "2"),
+    0x3: (4, "4"),
+    0x4: (8, "8"),
+    0x5: (16, "16"),
+    0x6: (32, "32"),
+    0x7: (64, "64"),
+    0x8: (12, "12"),
+    0x9: (20, "20"),
+    0xA: (None, "RFU"),
+    0xB: (None, "RFU"),
+    0xC: (None, "RFU"),
+    0xD: (None, "RFU"),
+    0xE: (None, "RFU"),
+    0xF: (None, "RFU")
+}
+
+
+def load_atrlist():
+    """
+    Format, ATR hex starts from 3B or 3F. Ignore # comments
+    <ATR hex values, space divided 2 letter HEX> sometimes .... Description
+    Maybe also description
+    """
+    atrlist = {}
+    
+    atr = ""
+    description = ""
+
+    with open("atr.txt", "r") as f:
+        for line in f:
+            # remove comments
+            if line.startswith("#"):
+                continue
+            # remove leading and trailing whitespace
+            line = line.strip()
+            if not line:
+                continue
+            parts = line.split()
+            # split the line into parts
+            # check if the first part 3B or 3F
+            if len(parts) > 0 and (parts[0] == "3B" or parts[0] == "3F"):
+                # wrap up previous parts and description and add to atrlist
+                if len(atr) > 0:
+                    atr = atr.strip()
+                    atrlist[atr] = description.strip()
+                # reset atr and description
+                description = ""
+                atr = parts[0] + " "
+                for i in range(len(parts)):
+                    # is it still 2 letter hex?
+                    if len(parts[i]) == 2 and re.match(r'^[0-9A-Fa-f]{2}$', parts[i]):
+                        atr += parts[i] + " "
+                    else:
+                        # if not, rest of the line is description
+                        description = " ".join(parts[i:])
+                        break
+            else:
+                description = " ".join(parts)
+
+    print(f"Loaded {len(atrlist)} ATRs")
+    #print(f"{atrlist}")
+    # add last atr and description
+    return atrlist
+
+def decodeATR(atr, atrlist):
+    atr_printable = [format(b, '#04X')[2:] for b in atr]
+    atr_string = " ".join(atr_printable)
+    alist_keys = list(atrlist.keys())
+    for key in alist_keys:
+        alist_value = atrlist[key]
+        # check if atr starts with key, if atr >= key
+        if len(atr) >= len(key):
+            # check if atr starts with key
+            if atr_string.startswith(key):
+                print(f"ATR match: {key} > {atrlist[key]}")
+                break
+        else:
+            # check if key is part of atr
+            if key.startswith(atr_string):
+                print(f"ATR match: {key} > {atrlist[key]}")
+                break
+
+    print(f"ATR(hex): {atr_string} len {len(atr)}")
     if len(atr) < 14:
-        print ("ATR too short")
+        print("ATR too short")
         return
-    # decode tag type
-    if atr[13] == 0x11:
-        print ("Tag type: Mifare Classic 1K")
-    elif atr[13] == 0x12:
-        print ("Tag type: Mifare Classic 4K")
-    elif atr[13] == 0x04:
-        print ("Tag type: Mifare Ultralight")
-    elif atr[13] == 0x44:
-        print ("Tag type: Mifare Plus")
-    elif atr[13] == 0x02:
-        print ("Tag type: Mifare Mini")
-    elif atr[13] == 0x28:
-        print ("Tag type: Mifare DESFire")
-    elif atr[13] == 0x20:
-        print ("Tag type: ISO 14443-4")
+    tag_type_code = atr[13]
+    tag_type = TAG_TYPE_MAP.get(tag_type_code, "Unknown")
+    print(f"Tag type: {tag_type_code:#04x} > {tag_type}")
+    ta1_value = atr[2]
+    ta1_fi = (ta1_value >> 4) & 0x0F
+    ta1_di = ta1_value & 0x0F
+    print(f"TA1: {ta1_value:#04x} > FI: {ta1_fi:#04x}, DI: {ta1_di:#04x}")
+    fi_key, fi_value = ta1_Fi_table.get(ta1_fi, (None, "Unknown"))
+    di_key, di_value = ta1_Di_table.get(ta1_di, (None, "Unknown"))
+    fi_value = int(fi_value) if fi_value is not None and not "RFU" else None
+    di_value = int(di_value) if di_value is not None and not "RFU" else None
+    print(f"TA1(decode): FI={fi_value}, DI={di_value}")
+    # Calculate frequency and baud rate if both values are valid
+    if fi_value is not None and di_value is not None:
+        frequency = fi_value
+        max_frequency = 5000000  # 5 MHz typical
+        actual_frequency = max_frequency / fi_value
+        baud_rate = actual_frequency / di_value
+        
+        print(f"\nCalculated values:")
+        print(f"Clock frequency: {actual_frequency/1000:.1f} kHz")
+        print(f"Maximum baud rate: {baud_rate/1000:.1f} kbps")
     else:
-        print ("Tag type: Unknown")
+        print(f"\nCannot calculate frequency/baud rate (RFU or invalid values)")    
 
 
 def hex2str(data):
@@ -130,7 +264,7 @@ def decodeStatus(data):
             }.get(data[8 + i * 5], "Unknown")
             print (f"  Modulation type: {modtype}")
 
-def testReader(id):
+def testReader(id, atrlist):
     # get all the available readers
     r = readers()
     print ("Available readers:", r)
@@ -150,7 +284,7 @@ def testReader(id):
 
         # get the ATR of the card
         atr = connection.getATR()
-        decodeATR(atr)
+        decodeATR(atr, atrlist)
 
         # get NFC tag UID (seems broken?)
         #CMD = [0xFF, 0xCA, 0x00, 0x00, 0x00]
@@ -266,9 +400,10 @@ def main():
     argp.add_argument('-l', '--list', action='store_true', help='List operating parameters')
     args = argp.parse_args()
 
+    atrlist = load_atrlist()
     # test
     if args.status:
-        testReader(0)
+        testReader(0, atrlist)
         return
     
     # get firmware version
